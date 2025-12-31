@@ -1,0 +1,83 @@
+[
+  {
+    "Time": "00:13:23",
+    "Symbol": "RSRUSDT",
+    "Direction": "LONG",
+    "Entry": "0.00239739",
+    "TP1": "0.00246930",
+    "TP2": "0.00254120",
+    "Status": "RUNNING"
+  },
+  {
+    "Time": "00:13:10",
+    "Symbol": "ALGOUSDT",
+    "Direction": "LONG",
+    "Entry": "0.11041296",
+    "TP1": "0.11262100",
+    "TP2": "0.11482900",
+    "Status": "RUNNING"
+  },
+  {
+    "Time": "00:13:03",
+    "Symbol": "MEMEUSDT",
+    "Direction": "LONG",
+    "Entry": "0.00098027",
+    "TP1": "0.00102928",
+    "TP2": "0.00107830",
+    "Status": "RUNNING"
+  },
+  {
+    "Time": "00:10:59",
+    "Symbol": "WIFUSDT",
+    "Direction": "LONG",
+    "Entry": "0.26612585",
+    "TP1": "0.27144800",
+    "TP2": "0.27677100",
+    "Status": "RUNNING"
+  },
+  {
+    "Time": "23:45:16",
+    "Symbol": "BONKUSDT",
+    "Direction": "LONG",
+    "Entry": "0.00000749",
+    "TP1": "0.00000786",
+    "TP2": "0.00000824",
+    "Status": "RUNNING"
+  },
+  {
+    "Time": "23:25:26",
+    "Symbol": "WIFUSDT",
+    "Direction": "LONG",
+    "Entry": "0.26576719",
+    "TP1": "0.27108300",
+    "TP2": "0.27639800",
+    "Status": "RUNNING"
+  },
+  {
+    "Time": "23:02:27",
+    "Symbol": "BONKUSDT",
+    "Direction": "LONG",
+    "Entry": "0.00000750",
+    "TP1": "0.00000787",
+    "TP2": "0.00000825",
+    "Status": "MANUALLY CLOSED \u274c"
+  },
+  {
+    "Time": "22:54:27",
+    "Symbol": "FLOKIUSDT",
+    "Direction": "LONG",
+    "Entry": "0.00003899",
+    "TP1": "0.00004094",
+    "TP2": "0.00004289",
+    "Status": "MANUALLY CLOSED \u274c"
+  },
+  {
+    "Time": "22:47:14",
+    "Symbol": "BONKUSDT",
+    "Direction": "LONG",
+    "Entry": "0.00000749",
+    "TP1": "0.00000786",
+    "TP2": "0.00000824",
+    "Status": "MANUALLY CLOSED \u274c"
+  }
+]
