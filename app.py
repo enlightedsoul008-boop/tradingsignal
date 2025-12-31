@@ -4,15 +4,32 @@ import pandas as pd
 import json, os
 from datetime import datetime
 
-# ================= CONFIG =================
+# ================= BASIC CONFIG =================
 st.set_page_config(
     page_title="World Class Futures Scanner",
     layout="wide"
 )
 
+APP_PASSWORD = "uatpjexk2a@9988"   # 🔐 change as needed
+
 API_URL = "https://api.delta.exchange/v2/tickers"
 DATA_FILE = "trades.json"
 OI_FILE = "oi_snapshot.json"
+
+# ================= PASSWORD GATE =================
+if "auth" not in st.session_state:
+    st.session_state.auth = False
+
+if not st.session_state.auth:
+    st.markdown("## 🔐 Login Required")
+    pwd = st.text_input("Enter Password", type="password")
+    if st.button("LOGIN", use_container_width=True):
+        if pwd == APP_PASSWORD:
+            st.session_state.auth = True
+            st.rerun()
+        else:
+            st.error("❌ Wrong password")
+    st.stop()
 
 # ================= FILE HELPERS =================
 def load_trades():
@@ -95,22 +112,17 @@ def find_trade(df, oi_prev):
             continue
 
         prev_oi = oi_prev.get(r["Symbol"], 0)
-        oi_change = r["OI"] - prev_oi
-
-        # 🔥 OI CHANGE FILTER
-        if oi_change <= 0:
+        if r["OI"] - prev_oi <= 0:
             continue
 
-        # 🔥 DIRECTION
         if r["Volume"] > r["OI"]:
             direction = "LONG"
-            score = r["Volume"] / (r["OI"]+1)
-            # FUNDING FILTER
+            score = r["Volume"] / (r["OI"] + 1)
             if r["Funding"] > 0:
                 continue
         else:
             direction = "SHORT"
-            score = r["OI"] / (r["Volume"]+1)
+            score = r["OI"] / (r["Volume"] + 1)
             if r["Funding"] < 0:
                 continue
 
@@ -150,7 +162,7 @@ def update_status(trade, price):
     return trade
 
 # ================= UI =================
-st.title("🚀 World Class Futures Scanner")
+st.markdown("## 🚀 World Class Futures Scanner")
 
 trades = load_trades()
 oi_prev = load_oi()
@@ -158,40 +170,37 @@ oi_prev = load_oi()
 df = prepare_df(fetch_data())
 price_map = dict(zip(df["Symbol"], df["Price"]))
 
-# Update running trades
 for t in trades:
     if t["Status"] == "RUNNING" and t["Symbol"] in price_map:
         update_status(t, price_map[t["Symbol"]])
 
 save_trades(trades)
-
-# Save latest OI snapshot
 save_oi(dict(zip(df["Symbol"], df["OI"])))
 
 st.caption(f"📊 Markets scanned: {len(df)}")
 
 # ================= GET TRADE =================
 if st.button("🔥 GET BEST TRADE", use_container_width=True):
-    new_trade = find_trade(df, oi_prev)
-    if new_trade:
-        trades.insert(0, new_trade)
+    trade = find_trade(df, oi_prev)
+    if trade:
+        trades.insert(0, trade)
         save_trades(trades)
-        st.success("✅ High probability trade added (OI + Funding confirmed)")
+        st.success("✅ High probability trade added")
     else:
-        st.warning("❌ No mota paisa trade right now")
+        st.warning("❌ No mota paisa trade now")
 
 st.divider()
 
-# ================= RUNNING TRADES PANEL =================
+# ================= RUNNING TRADES =================
 st.subheader("🟢 RUNNING TRADES")
 
-running_trades = [t for t in trades if t["Status"] == "RUNNING"]
+running = [t for t in trades if t["Status"] == "RUNNING"]
 
-if not running_trades:
+if not running:
     st.info("No running trades")
 else:
-    for idx, t in enumerate(running_trades):
-        c1, c2, c3, c4, c5, c6, c7 = st.columns([1.2, 1.5, 1, 1.5, 1.5, 1.5, 1.8])
+    for i, t in enumerate(running):
+        c1, c2, c3, c4, c5, c6, c7 = st.columns([1.1,1.4,0.9,1.4,1.4,1.4,1.8])
         c1.write(t["Time"])
         c2.write(t["Symbol"])
         c3.write(t["Direction"])
@@ -199,7 +208,7 @@ else:
         c5.write(t["TP1"])
         c6.write(t["TP2"])
 
-        if c7.button("🛑 CLOSE", key=f"close_{idx}"):
+        if c7.button("🛑 CLOSE", key=f"close_{i}"):
             t["Status"] = "MANUALLY CLOSED ❌"
             save_trades(trades)
             st.rerun()
@@ -213,4 +222,4 @@ if trades:
 else:
     st.info("No trades yet")
 
-st.caption("⚠️ Futures risky hote hain | OI Change + Funding Rate Filter Enabled")
+st.caption("⚠️ Futures risky hote hain | Mobile optimized | Secure login enabled")
