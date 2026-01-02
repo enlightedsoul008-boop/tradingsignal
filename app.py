@@ -16,7 +16,7 @@ API_URL = "https://api.delta.exchange/v2/tickers"
 DATA_FILE = "trades.json"
 OI_FILE = "oi_snapshot.json"
 
-# ================= PASSWORD GATE =================
+# ================= PASSWORD =================
 if "auth" not in st.session_state:
     st.session_state.auth = False
 
@@ -32,24 +32,17 @@ if not st.session_state.auth:
     st.stop()
 
 # ================= FILE HELPERS =================
-def load_trades():
-    if not os.path.exists(DATA_FILE):
-        return []
-    with open(DATA_FILE, "r") as f:
-        return json.load(f)
+def load_json(path, default):
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except:
+        return default
 
-def save_trades(trades):
-    with open(DATA_FILE, "w") as f:
-        json.dump(trades, f, indent=2)
-
-def load_oi():
-    if not os.path.exists(OI_FILE):
-        return {}
-    with open(OI_FILE, "r") as f:
-        return json.load(f)
-
-def save_oi(data):
-    with open(OI_FILE, "w") as f:
+def save_json(path, data):
+    with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
 # ================= FETCH =================
@@ -65,69 +58,63 @@ def fetch_data():
 def prepare_df(data):
     rows = []
     for d in data:
-        symbol = d.get("symbol")
-        mark = d.get("mark_price")
-        if not symbol or not mark:
-            continue
         try:
-            price = float(mark)
+            rows.append({
+                "Symbol": d.get("symbol"),
+                "Price": float(d.get("mark_price", 0)),
+                "Volume": float(d.get("volume", 0)),
+                "OI": float(d.get("oi", 0)),
+                "Funding": float(d.get("funding_rate", 0)),
+                "High": float(d.get("high", 0)),
+                "Low": float(d.get("low", 0))
+            })
         except:
             continue
-
-        rows.append({
-            "Symbol": symbol,
-            "Price": price,
-            "Volume": float(d.get("volume", 0) or 0),
-            "OI": float(d.get("oi", 0) or 0),
-            "Funding": float(d.get("funding_rate", 0) or 0)
-        })
     return pd.DataFrame(rows)
 
 # ================= TP LOGIC =================
 def calc_tp(price, direction):
-    if price < 0.001:
-        p1, p2, d = 0.05, 0.10, 8
-    elif price < 0.01:
-        p1, p2, d = 0.03, 0.06, 7
+    if price < 0.01:
+        p1, p2, d = 0.04, 0.08, 6
     elif price < 1:
-        p1, p2, d = 0.02, 0.04, 6
+        p1, p2, d = 0.025, 0.05, 5
     else:
-        p1, p2, d = 0.01, 0.02, 4
+        p1, p2, d = 0.015, 0.03, 4
 
     if direction == "LONG":
         return round(price*(1+p1), d), round(price*(1+p2), d)
     else:
         return round(price*(1-p1), d), round(price*(1-p2), d)
 
-# ================= STRATEGY (FIXED – NO BIAS) =================
-def find_trade(df, oi_prev):
-    if df.empty:
-        return None
-
-    df = df.sort_values("Volume", ascending=False).head(25)
-
+# ================= BLAST STRATEGY =================
+def find_blast_trade(df, oi_prev):
     best, best_score = None, 0
 
     for _, r in df.iterrows():
-        if r["Volume"] < 1000 or r["OI"] < 1000:
+        if r["OI"] < 500 or r["Volume"] < 500:
             continue
 
         prev_oi = oi_prev.get(r["Symbol"], 0)
         oi_change = r["OI"] - prev_oi
-        if oi_change <= 0:
+        if oi_change <= r["OI"] * 0.01:
             continue
 
-        vol_oi_ratio = r["Volume"] / (r["OI"] + 1)
+        vol_oi = r["Volume"] / (r["OI"] + 1)
 
-        # ===== LONG (Smart money entry) =====
-        if oi_change > 0 and vol_oi_ratio > 1.2 and r["Funding"] <= 0:
+        if r["High"] > 0 and r["Low"] > 0:
+            range_pct = (r["High"] - r["Low"]) / r["Price"]
+        else:
+            continue
+
+        # ===== BLAST LONG =====
+        if vol_oi < 0.9 and r["Funding"] < 0 and range_pct < 0.012:
             direction = "LONG"
-            score = oi_change * vol_oi_ratio
+            score = oi_change / (range_pct + 0.001)
 
-        # ===== SHORT (Distribution / trap) =====
-        elif oi_change > 0 and vol_oi_ratio < 0.8 and r["Funding"] >= 0:
+        # ===== BLAST SHORT =====
+        elif vol_oi < 0.9 and r["Funding"] > 0 and range_pct < 0.012:
             direction = "SHORT"
-            score = oi_change / (vol_oi_ratio + 0.01)
+            score = oi_change / (range_pct + 0.001)
 
         else:
             continue
@@ -141,7 +128,8 @@ def find_trade(df, oi_prev):
                 "Entry": f"{r['Price']:.8f}",
                 "TP1": f"{tp1:.8f}",
                 "TP2": f"{tp2:.8f}",
-                "Status": "RUNNING"
+                "Status": "RUNNING",
+                "Note": "⚡ PRE-BLAST (15–20 MIN)"
             }
             best_score = score
 
@@ -150,7 +138,7 @@ def find_trade(df, oi_prev):
 # ================= STATUS UPDATE =================
 def update_status(trade, price):
     if trade["Status"] != "RUNNING":
-        return trade
+        return
 
     tp1, tp2 = float(trade["TP1"]), float(trade["TP2"])
 
@@ -165,13 +153,11 @@ def update_status(trade, price):
         elif price <= tp1:
             trade["Status"] = "TP1 HIT 🟢"
 
-    return trade
-
 # ================= UI =================
-st.markdown("## 🚀 World Class Futures Scanner")
+st.markdown("## 💣 BLAST FUTURES SCANNER (15–20 Min)")
 
-trades = load_trades()
-oi_prev = load_oi()
+trades = load_json(DATA_FILE, [])
+oi_prev = load_json(OI_FILE, {})
 
 df = prepare_df(fetch_data())
 price_map = dict(zip(df["Symbol"], df["Price"]))
@@ -180,31 +166,30 @@ for t in trades:
     if t["Status"] == "RUNNING" and t["Symbol"] in price_map:
         update_status(t, price_map[t["Symbol"]])
 
-save_trades(trades)
-save_oi(dict(zip(df["Symbol"], df["OI"])))
+save_json(DATA_FILE, trades)
+save_json(OI_FILE, dict(zip(df["Symbol"], df["OI"])))
 
 
 st.caption(f"📊 Markets scanned: {len(df)}")
 
-# ================= GET TRADE =================
-if st.button("🔥 GET BEST TRADE", use_container_width=True):
-    trade = find_trade(df, oi_prev)
+# ================= GET BLAST =================
+if st.button("🔥 GET BLAST SIGNAL", use_container_width=True):
+    trade = find_blast_trade(df, oi_prev)
     if trade:
         trades.insert(0, trade)
-        save_trades(trades)
-        st.success("✅ High probability trade added")
+        save_json(DATA_FILE, trades)
+        st.success("💣 PRE-BLAST TRADE FOUND")
     else:
-        st.warning("❌ No mota paisa trade now")
+        st.warning("❌ No blast setup right now")
 
 st.divider()
 
-# ================= RUNNING TRADES =================
-st.subheader("🟢 RUNNING TRADES")
-
+# ================= RUNNING =================
+st.subheader("🟢 RUNNING BLAST TRADES")
 running = [t for t in trades if t["Status"] == "RUNNING"]
 
 if not running:
-    st.info("No running trades")
+    st.info("No running blast trades")
 else:
     for i, t in enumerate(running):
         c1, c2, c3, c4, c5, c6, c7 = st.columns([1.1,1.4,0.9,1.4,1.4,1.4,1.8])
@@ -214,19 +199,18 @@ else:
         c4.write(t["Entry"])
         c5.write(t["TP1"])
         c6.write(t["TP2"])
-
         if c7.button("🛑 CLOSE", key=f"close_{i}"):
             t["Status"] = "MANUALLY CLOSED ❌"
-            save_trades(trades)
+            save_json(DATA_FILE, trades)
             st.rerun()
 
 st.divider()
 
 # ================= HISTORY =================
-st.subheader("📜 Trade Scan History")
+st.subheader("📜 BLAST SCAN HISTORY")
 if trades:
     st.dataframe(pd.DataFrame(trades), use_container_width=True)
 else:
-    st.info("No trades yet")
+    st.info("No blast trades yet")
 
-st.caption("⚠️ Futures risky hote hain | Mobile optimized | Secure login enabled")
+st.caption("⚠️ High-risk strategy | Futures only | Use risk management")
