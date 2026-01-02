@@ -10,7 +10,7 @@ st.set_page_config(
     layout="wide"
 )
 
-APP_PASSWORD = "uatpjexk2a@9988"
+APP_PASSWORD = "uatpjexk2a@9988"   # 🔐 change as needed
 
 API_URL = "https://api.delta.exchange/v2/tickers"
 DATA_FILE = "trades.json"
@@ -79,9 +79,7 @@ def prepare_df(data):
             "Price": price,
             "Volume": float(d.get("volume", 0) or 0),
             "OI": float(d.get("oi", 0) or 0),
-            "Funding": float(d.get("funding_rate", 0) or 0),
-            # ✅ STEP 1: price change added
-            "Change": float(d.get("price_change_percent", 0) or 0)
+            "Funding": float(d.get("funding_rate", 0) or 0)
         })
     return pd.DataFrame(rows)
 
@@ -114,26 +112,19 @@ def find_trade(df, oi_prev):
             continue
 
         prev_oi = oi_prev.get(r["Symbol"], 0)
-        oi_delta = r["OI"] - prev_oi
-        if oi_delta <= 0:
+        if r["OI"] - prev_oi <= 0:
             continue
 
-        # ✅ STEP 2: balanced direction logic
-        if oi_delta > 0 and r["Change"] > 0:
+        if r["Volume"] > r["OI"]:
             direction = "LONG"
-        elif oi_delta > 0 and r["Change"] < 0:
-            direction = "SHORT"
+            score = r["Volume"] / (r["OI"] + 1)
+            if r["Funding"] > 0:
+                continue
         else:
-            continue
-
-        # ✅ STEP 3: smart funding filter
-        if direction == "LONG" and r["Funding"] > 0.01:
-            continue
-        if direction == "SHORT" and r["Funding"] < -0.01:
-            continue
-
-        # ✅ STEP 4: neutral score
-        score = (r["Volume"] * oi_delta) / (abs(r["Change"]) + 0.001)
+            direction = "SHORT"
+            score = r["OI"] / (r["Volume"] + 1)
+            if r["Funding"] < 0:
+                continue
 
         if score > best_score:
             tp1, tp2 = calc_tp(r["Price"], direction)
@@ -231,4 +222,4 @@ if trades:
 else:
     st.info("No trades yet")
 
-st.caption("⚠️ Futures risky hote hain | Mobile optimized | Secure login enabled")
+st.caption("⚠️ Futures risky hote hain | Mobile optimized | Secure login enabled") 
