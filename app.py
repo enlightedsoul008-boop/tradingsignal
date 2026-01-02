@@ -1,17 +1,12 @@
 import streamlit as st
-import requests
+import requests, json, os
 import pandas as pd
-import json, os
 from datetime import datetime
 
 # ================= BASIC CONFIG =================
-st.set_page_config(
-    page_title="World Class Futures Scanner",
-    layout="wide"
-)
+st.set_page_config(page_title="World Class Multi Strategy Scanner", layout="wide")
 
 APP_PASSWORD = "uatpjexk2a@9988"
-
 API_URL = "https://api.delta.exchange/v2/tickers"
 DATA_FILE = "trades.json"
 OI_FILE = "oi_snapshot.json"
@@ -73,144 +68,134 @@ def prepare_df(data):
     return pd.DataFrame(rows)
 
 # ================= TP LOGIC =================
-def calc_tp(price, direction):
-    if price < 0.01:
-        p1, p2, d = 0.04, 0.08, 6
-    elif price < 1:
-        p1, p2, d = 0.025, 0.05, 5
-    else:
-        p1, p2, d = 0.015, 0.03, 4
+def calc_tp(price, direction, mode):
+    if mode == "SCALP":
+        p1, p2 = 0.005, 0.01
+    elif mode == "INTRADAY":
+        p1, p2 = 0.015, 0.03
+    elif mode == "SWING":
+        p1, p2 = 0.04, 0.08
+    else:  # BLAST
+        p1, p2 = 0.02, 0.04
 
     if direction == "LONG":
-        return round(price*(1+p1), d), round(price*(1+p2), d)
+        return price*(1+p1), price*(1+p2)
     else:
-        return round(price*(1-p1), d), round(price*(1-p2), d)
+        return price*(1-p1), price*(1-p2)
 
-# ================= BLAST STRATEGY =================
-def find_blast_trade(df, oi_prev):
-    best, best_score = None, 0
+# ================= STRATEGIES =================
 
+def scan_blast(df, oi_prev):
     for _, r in df.iterrows():
-        if r["OI"] < 500 or r["Volume"] < 500:
-            continue
-
         prev_oi = oi_prev.get(r["Symbol"], 0)
         oi_change = r["OI"] - prev_oi
-        if oi_change <= r["OI"] * 0.01:
+        if oi_change <= r["OI"]*0.01:
+            continue
+        if r["High"] <= 0 or r["Low"] <= 0:
             continue
 
-        vol_oi = r["Volume"] / (r["OI"] + 1)
-
-        if r["High"] > 0 and r["Low"] > 0:
-            range_pct = (r["High"] - r["Low"]) / r["Price"]
-        else:
+        range_pct = (r["High"] - r["Low"]) / r["Price"]
+        if range_pct > 0.012:
             continue
 
-        # ===== BLAST LONG =====
-        if vol_oi < 0.9 and r["Funding"] < 0 and range_pct < 0.012:
+        if r["Funding"] < 0:
             direction = "LONG"
-            score = oi_change / (range_pct + 0.001)
-
-        # ===== BLAST SHORT =====
-        elif vol_oi < 0.9 and r["Funding"] > 0 and range_pct < 0.012:
+        elif r["Funding"] > 0:
             direction = "SHORT"
-            score = oi_change / (range_pct + 0.001)
-
         else:
             continue
 
-        if score > best_score:
-            tp1, tp2 = calc_tp(r["Price"], direction)
-            best = {
-                "Time": datetime.now().strftime("%H:%M:%S"),
-                "Symbol": r["Symbol"],
-                "Direction": direction,
-                "Entry": f"{r['Price']:.8f}",
-                "TP1": f"{tp1:.8f}",
-                "TP2": f"{tp2:.8f}",
-                "Status": "RUNNING",
-                "Note": "⚡ PRE-BLAST (15–20 MIN)"
-            }
-            best_score = score
+        tp1, tp2 = calc_tp(r["Price"], direction, "BLAST")
+        return build_trade(r, direction, tp1, tp2, "BLAST", "Pre-Blast Expansion")
+    return None
 
-    return best
+def scan_scalp(df):
+    for _, r in df.sort_values("Volume", ascending=False).head(20).iterrows():
+        if r["Volume"] > r["OI"]*0.8:
+            direction = "LONG"
+        else:
+            direction = "SHORT"
 
-# ================= STATUS UPDATE =================
-def update_status(trade, price):
-    if trade["Status"] != "RUNNING":
-        return
+        tp1, tp2 = calc_tp(r["Price"], direction, "SCALP")
+        return build_trade(r, direction, tp1, tp2, "SCALP", "Quick momentum")
+    return None
 
-    tp1, tp2 = float(trade["TP1"]), float(trade["TP2"])
+def scan_intraday(df):
+    for _, r in df.iterrows():
+        if abs(r["Funding"]) < 0.005 and r["Volume"] > r["OI"]*0.4:
+            direction = "LONG"
+            tp1, tp2 = calc_tp(r["Price"], direction, "INTRADAY")
+            return build_trade(r, direction, tp1, tp2, "INTRADAY", "Intraday trend")
+    return None
 
-    if trade["Direction"] == "LONG":
-        if price >= tp2:
-            trade["Status"] = "TP ACHIEVED ✅"
-        elif price >= tp1:
-            trade["Status"] = "TP1 HIT 🟢"
-    else:
-        if price <= tp2:
-            trade["Status"] = "TP ACHIEVED ✅"
-        elif price <= tp1:
-            trade["Status"] = "TP1 HIT 🟢"
+def scan_swing(df):
+    for _, r in df.iterrows():
+        if r["OI"] > 10000 and abs(r["Funding"]) < 0.01 and r["Volume"] > r["OI"]*0.25:
+            direction = "LONG"
+            tp1, tp2 = calc_tp(r["Price"], direction, "SWING")
+            return build_trade(r, direction, tp1, tp2, "SWING", "High probability swing")
+    return None
+
+def build_trade(r, direction, tp1, tp2, category, note):
+    return {
+        "Time": datetime.now().strftime("%H:%M:%S"),
+        "Symbol": r["Symbol"],
+        "Category": category,
+        "Direction": direction,
+        "Entry": f"{r['Price']:.6f}",
+        "TP1": f"{tp1:.6f}",
+        "TP2": f"{tp2:.6f}",
+        "Status": "RUNNING",
+        "Note": note
+    }
 
 # ================= UI =================
-st.markdown("## 💣 BLAST FUTURES SCANNER (15–20 Min)")
+st.markdown("## 🚀 World Class Multi-Strategy Scanner")
+
+mode = st.radio(
+    "🧠 Select Trade Category",
+    ["💣 BLAST", "⚡ SCALP", "🧭 INTRADAY", "🏹 SWING (HIGH PROB)"],
+    horizontal=True
+)
 
 trades = load_json(DATA_FILE, [])
 oi_prev = load_json(OI_FILE, {})
 
 df = prepare_df(fetch_data())
-price_map = dict(zip(df["Symbol"], df["Price"]))
-
-for t in trades:
-    if t["Status"] == "RUNNING" and t["Symbol"] in price_map:
-        update_status(t, price_map[t["Symbol"]])
-
-save_json(DATA_FILE, trades)
 save_json(OI_FILE, dict(zip(df["Symbol"], df["OI"])))
 
+if st.button("🔥 GET HIGH PROBABILITY TRADE", use_container_width=True):
+    if mode.startswith("💣"):
+        trade = scan_blast(df, oi_prev)
+    elif mode.startswith("⚡"):
+        trade = scan_scalp(df)
+    elif mode.startswith("🧭"):
+        trade = scan_intraday(df)
+    else:
+        trade = scan_swing(df)
 
-st.caption(f"📊 Markets scanned: {len(df)}")
-
-# ================= GET BLAST =================
-if st.button("🔥 GET BLAST SIGNAL", use_container_width=True):
-    trade = find_blast_trade(df, oi_prev)
     if trade:
         trades.insert(0, trade)
         save_json(DATA_FILE, trades)
-        st.success("💣 PRE-BLAST TRADE FOUND")
+        st.success(f"✅ {trade['Category']} TRADE FOUND")
     else:
-        st.warning("❌ No blast setup right now")
+        st.warning("❌ No setup right now")
 
 st.divider()
 
-# ================= RUNNING =================
-st.subheader("🟢 RUNNING BLAST TRADES")
+st.subheader("🟢 RUNNING TRADES")
 running = [t for t in trades if t["Status"] == "RUNNING"]
-
-if not running:
-    st.info("No running blast trades")
+if running:
+    st.dataframe(pd.DataFrame(running), use_container_width=True)
 else:
-    for i, t in enumerate(running):
-        c1, c2, c3, c4, c5, c6, c7 = st.columns([1.1,1.4,0.9,1.4,1.4,1.4,1.8])
-        c1.write(t["Time"])
-        c2.write(t["Symbol"])
-        c3.write(t["Direction"])
-        c4.write(t["Entry"])
-        c5.write(t["TP1"])
-        c6.write(t["TP2"])
-        if c7.button("🛑 CLOSE", key=f"close_{i}"):
-            t["Status"] = "MANUALLY CLOSED ❌"
-            save_json(DATA_FILE, trades)
-            st.rerun()
+    st.info("No running trades")
 
 st.divider()
 
-# ================= HISTORY =================
-st.subheader("📜 BLAST SCAN HISTORY")
+st.subheader("📜 TRADE HISTORY")
 if trades:
     st.dataframe(pd.DataFrame(trades), use_container_width=True)
 else:
-    st.info("No blast trades yet")
+    st.info("No trades yet")
 
-st.caption("⚠️ High-risk strategy | Futures only | Use risk management")
+st.caption("⚠️ Futures risky hote hain | Multi-strategy engine | Pro level scanner")
